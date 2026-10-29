@@ -12,12 +12,21 @@ const FENCE = /^ {0,3}(`{3,}|~{3,})/
 const DISPLAY_ENVS = "equation|align|alignat|gather|multline|eqnarray|displaymath|math"
 const DISPLAY_START = new RegExp(`^((?:[ \\t]*>)*[ \\t]*)(\\$\\$|\\\\\\[|\\\\begin\\{(?:${DISPLAY_ENVS})\\*?\\})`)
 
-function safely(render: () => string): string | undefined {
+// Streaming re-renders the whole document for every chunk, so remember
+// rendered expressions. Bounded: cleared when it grows too large.
+const cache = new Map<string, string | undefined>()
+
+function cached(key: string, render: () => string): string | undefined {
+  if (cache.has(key)) return cache.get(key)
+  let result: string | undefined
   try {
-    return render()
+    result = render()
   } catch {
-    return undefined
+    result = undefined
   }
+  if (cache.size > 5000) cache.clear()
+  cache.set(key, result)
+  return result
 }
 
 /** Replaces inline math in one line of markdown with `wrap(rendered)`. */
@@ -26,7 +35,7 @@ export function replaceInlineMath(line: string, wrap: (math: string) => string):
   let out = ""
   let i = 0
   const emit = (latex: string, end: number, fallback: string) => {
-    const rendered = latex.trim() ? safely(() => renderInline(latex)) : undefined
+    const rendered = latex.trim() ? cached(`i${latex}`, () => renderInline(latex)) : undefined
     out += rendered === undefined ? fallback : wrap(rendered)
     i = end
   }
@@ -125,7 +134,7 @@ export function renderMathInMarkdown(markdown: string): MathRendered {
     const display = DISPLAY_START.exec(line)
     const block = display && collectDisplay(lines, i, display[1]!, display[2]!)
     if (block) {
-      const rendered = safely(() => renderDisplay(block.latex).join("\n"))
+      const rendered = cached(`d${block.latex}`, () => renderDisplay(block.latex).join("\n"))
       if (rendered !== undefined) {
         rendered.split("\n").forEach((row, k) => {
           out.push(`${display[1]}${MATH_OPEN}  ${row}${MATH_CLOSE}`)
