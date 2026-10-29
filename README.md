@@ -27,6 +27,9 @@ style rules, and opencode's themes.
 - **Lists**: a different bullet at each nesting depth (`•` `◦` `▸`), coloured
   numbers, and `☐`/`☑` task checkboxes.
 - **Blockquotes** have a coloured bar and italic text.
+- **LaTeX math**: `$…$` and `\(…\)` render inline as Unicode (`x² + y²`,
+  `αᵢ ∈ ℝ`), and `$$…$$` / `\[…\]` render as 2D blocks with stacked fractions,
+  limits and matrices (see below).
 - **Inline styles**: bold, italic, strikethrough, `code`, links, `<u>underline</u>`
   / `<ins>`, and `==highlight==` / `<mark>`.
 - **Streaming**: pipe an LLM's output straight in and watch it render live,
@@ -74,6 +77,29 @@ passes the line the way each editor expects: `+LINE` for vi, vim, nvim, nano,
 emacs, micro, kak and others; `FILE:LINE` for helix; and `--wait --goto` for
 VS Code, Cursor and similar. When the editor exits, oturead reloads the file
 and scrolls back to the same place.
+
+### Math
+
+Terminals can't typeset, so oturead converts LaTeX math to Unicode text.
+
+- **Inline math** (`$…$`, `\(…\)`) stays on one line: `$\alpha_i \in \mathbb{R}$`
+  becomes `αᵢ ∈ ℝ`, and `$\sqrt{a^2+b^2}$` becomes `√(a² + b²)`. Unicode has
+  superscripts for only some characters (digits, most Latin letters, a few
+  Greek ones), so others fall back to `^(…)`: `$e^{\pi\iota}$` becomes
+  `e^(πι)`.
+- **Display math** (`$$…$$`, `\[…\]`, or a bare `\begin{align}` block) is
+  laid out over several lines: fractions are stacked, exponents raised,
+  limits go above and below `∑`, and matrices and `cases` get tall brackets.
+
+![math](docs/screenshot-math.png)
+
+It covers the LaTeX that LLMs usually write: Greek letters, operators,
+relations, arrows, scripts, `\frac`, `\sqrt`, accents, `\mathbb` and other
+letter styles, `\left`/`\right`, `\text`, and the `matrix`, `cases` and
+`aligned` environments. Unknown commands are shown as written.
+
+Math inside code is never touched, and `$5 and $10` isn't treated as math.
+Press `r` to see the original LaTeX.
 
 ### Long documents
 
@@ -140,6 +166,7 @@ Themes in `~/.config/opencode/themes/` are picked up too.
 | `src/progressive.ts`   | Picks the leading blocks of a large document to render first. |
 | `src/position.ts`      | Maps between rendered rows and source lines, for the editor, folding and the table of contents. |
 | `src/editor.ts`        | Works out the editor command and launches it at a given line. |
+| `src/math/`            | The LaTeX parser and its inline and 2D renderers (`latex.ts`, `symbols.ts`), and finding math in markdown (`markdown.ts`). |
 | `src/fuzzy.ts`         | The fuzzy matcher used by the theme picker. |
 | `src/parsers-config.ts`| The tree-sitter grammar list from opencode, plus extra fence aliases (`shell`, `golang`, `tf`, `jsonc`, …). |
 | `src/themes/`          | The bundled opencode themes. |
