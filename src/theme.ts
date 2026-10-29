@@ -99,7 +99,7 @@ export function resolveTheme(json: ThemeJson, mode: Mode): Theme {
 
   const out = {} as Theme
   for (const key of COLOR_KEYS) {
-    out[key] = resolve(json.theme[key] ?? fallback(key), [key])
+    out[key] = resolve(json.theme[key] ?? fallback(key), [])
   }
   return out
 }

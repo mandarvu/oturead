@@ -53,7 +53,18 @@ export function App({ source, themes, initialTheme, initialMode, onExit }: AppPr
   const [toast, setToast] = useState<string>()
   const savedScroll = useRef<number | undefined>(undefined)
 
-  const theme = useMemo(() => resolveTheme(themes[themeName]!, mode), [themes, themeName, mode])
+  // A malformed (user) theme falls back to opencode instead of crashing the UI.
+  const resolved = useMemo(() => {
+    try {
+      return { theme: resolveTheme(themes[themeName]!, mode) }
+    } catch (err: any) {
+      return { theme: resolveTheme(themes.opencode!, mode), error: `theme ${themeName}: ${err.message}` }
+    }
+  }, [themes, themeName, mode])
+  const theme = resolved.theme
+  useEffect(() => {
+    if (resolved.error) setToast(resolved.error)
+  }, [resolved])
   const syntax = useMemo(() => generateSyntax(theme), [theme])
   useEffect(() => () => syntax.destroy(), [syntax])
 
