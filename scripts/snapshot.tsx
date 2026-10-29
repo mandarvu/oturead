@@ -1,17 +1,17 @@
 // Headless render of a markdown file to HTML (for eyeballing output / docs screenshots).
 // Usage: bun scripts/snapshot.tsx <file.md> <out.html> [cols] [rows] [theme] [keys]
 // [keys] is a string of keypresses to send before capturing, e.g. "]]]" or "?".
-import { addDefaultParsers, RGBA, TextAttributes } from "@opentui/core"
+import { RGBA, TextAttributes } from "@opentui/core"
 import { testRender } from "@opentui/react/test-utils"
 import { readFileSync, writeFileSync } from "fs"
 import "../src/markdown-ext"
 import { App } from "../src/App"
-import parsers from "../src/parsers-config"
+import { warmUpHighlighter } from "../src/highlight"
 import { fileSource } from "../src/source"
 import { loadThemes } from "../src/theme"
 
 const [file, out, cols = "100", rows = "60", theme = "opencode", keys = ""] = process.argv.slice(2)
-addDefaultParsers(parsers.parsers)
+warmUpHighlighter(readFileSync(file!, "utf-8"))
 const setup = await testRender(
   <App source={fileSource(file!, file!.split("/").pop()!, false)} themes={loadThemes()} initialTheme={theme} initialMode="dark" onExit={() => {}} />,
   { width: Number(cols), height: Number(rows) },

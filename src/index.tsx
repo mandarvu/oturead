@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { addDefaultParsers, createCliRenderer } from "@opentui/core"
+import { createCliRenderer } from "@opentui/core"
 import { createRoot } from "@opentui/react"
 import { openSync, readFileSync } from "fs"
 import { basename, resolve } from "path"
@@ -7,7 +7,7 @@ import { ReadStream } from "tty"
 import { parseArgs } from "util"
 import "./markdown-ext"
 import { App } from "./App"
-import parsers from "./parsers-config"
+import { warmUpHighlighter } from "./highlight"
 import { fileSource, simulatedSource, stdinSource, type Source } from "./source"
 import { loadThemes, type Mode } from "./theme"
 
@@ -82,9 +82,8 @@ if (piped) {
   process.exit(1)
 }
 
-// Syntax highlighting for ~35 languages, same grammar set as opencode.
-// Grammars are fetched on first use and cached under $XDG_DATA_HOME.
-addDefaultParsers(parsers.parsers)
+// Start tree-sitter now so it loads in parallel with renderer setup.
+warmUpHighlighter(source.get().content)
 
 // When markdown arrives on stdin, keyboard input has to come from the terminal itself.
 const input = piped ? new ReadStream(openSync("/dev/tty", "r")) : process.stdin
