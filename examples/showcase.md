@@ -37,6 +37,27 @@ Links look like [the opencode repo](https://github.com/sst/opencode).
 | Python     | dynamic    | multi-paradigm        |           1991 |
 | Go         | static     | concurrent, <u>imperative</u> |           2009 |
 
+## Math
+
+Euler's identity is $e^{\pi\iota} = -1$. Inline math such as $x^2 + y^2 = z^2$,
+$\alpha_i \in \mathbb{R}$ or \(\sqrt{a^2+b^2}\) is rendered with Unicode. Prices like $5 and $10 stay as they are.
+
+Display math is laid out in two dimensions:
+
+$$
+x = \frac{-b \pm \sqrt{b^2 - 4ac}}{2a}
+$$
+
+$$
+\sum_{i=1}^{n} i = \frac{n(n+1)}{2} \qquad \int_{-\infty}^{\infty} e^{-x^2}\,dx = \sqrt{\pi}
+$$
+
+$$
+A = \begin{pmatrix} \cos\theta & -\sin\theta \\ \sin\theta & \cos\theta \end{pmatrix}
+\qquad
+|x| = \begin{cases} x & x \ge 0 \\ -x & \text{otherwise} \end{cases}
+$$
+
 ## Code
 
 ### TypeScript

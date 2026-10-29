@@ -4,6 +4,7 @@ import type { MarkdownRenderable, ScrollBoxRenderable } from "@opentui/core"
 import { generateSyntax, resolveTheme, type Mode, type ThemeJson } from "./theme"
 import { openInEditor } from "./editor"
 import { foldMarkdown } from "./fold"
+import { renderMathInMarkdown } from "./math/markdown"
 import { ancestry, parseOutline, sectionAt, type Section } from "./outline"
 import { followLine, lineAtRow, locateBlocks, rowOfLine, type BlockSpan } from "./position"
 import { leadingBlocks } from "./progressive"
@@ -62,22 +63,29 @@ export function App({ source, themes, initialTheme, initialMode, onExit }: AppPr
     }
   }, [renderer])
 
+  const [conceal, setConceal] = useState(true) // false: show raw markdown
+
   // Collapsed sections are removed from the markdown before rendering.
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set())
   const outline = useMemo(() => parseOutline(doc.content), [doc.content])
   const folded = useMemo(() => foldMarkdown(doc.content, outline, collapsed), [doc.content, outline, collapsed])
   // Ids of sections that no longer exist (after an edit) don't count.
   const foldCount = useMemo(() => outline.filter((s) => s.hasBody && collapsed.has(s.id)).length, [outline, collapsed])
-  const foldedRef = useRef(folded)
-  foldedRef.current = folded
-  const content = progressive && !doc.streaming ? leadingBlocks(folded.content, height * 2) : folded.content
+  // Then LaTeX math is rendered to Unicode (raw mode shows the LaTeX).
+  const rendered = useMemo(() => {
+    if (!conceal) return folded
+    const math = renderMathInMarkdown(folded.content)
+    return { content: math.content, toSource: (line: number) => folded.toSource(math.toSource(line)) }
+  }, [folded, conceal])
+  const renderedRef = useRef(rendered)
+  renderedRef.current = rendered
+  const content = progressive && !doc.streaming ? leadingBlocks(rendered.content, height * 2) : rendered.content
   const scrollRef = useRef<ScrollBoxRenderable>(null)
   const markdownRef = useRef<MarkdownRenderable>(null)
 
   const themeNames = useMemo(() => Object.keys(themes).sort(), [themes])
   const [themeName, setThemeName] = useState(themes[initialTheme] ? initialTheme : "opencode")
   const [mode, setMode] = useState<Mode>(initialMode)
-  const [conceal, setConceal] = useState(true)
   const [showHelp, setShowHelp] = useState(false)
   const [pickerOrigin, setPickerOrigin] = useState<string>() // theme to restore if the picker is cancelled
   const [scrollPct, setScrollPct] = useState(0)
@@ -134,7 +142,7 @@ export function App({ source, themes, initialTheme, initialMode, onExit }: AppPr
     const located = locateBlocks(md.content, states.map((state) => state.tokenRaw ?? state.token?.raw ?? ""))
     const base = box.content.y
     return states.map((state, i) => ({
-      line: foldedRef.current.toSource(located[i]!.line),
+      line: renderedRef.current.toSource(located[i]!.line),
       lines: located[i]!.lines,
       offset: state.renderable.y - base,
       height: Math.max(1, state.renderable.height),

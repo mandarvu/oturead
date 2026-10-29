@@ -56,6 +56,10 @@ describe("plainHeading", () => {
   test("strips inline markup", () => {
     expect(plainHeading("The **`opencode`** [repo](https://x) <u>now</u>")).toBe("The opencode repo now")
   })
+
+  test("renders math and keeps its symbols", () => {
+    expect(plainHeading("**Euler**: $e^{\\pi\\iota} = -1$ and $x_i$")).toBe("Euler: e^(πι) = −1 and xᵢ")
+  })
 })
 
 describe("sectionAt / ancestry", () => {

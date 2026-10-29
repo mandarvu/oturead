@@ -197,6 +197,7 @@ export function generateSyntax(t: Theme): SyntaxStyle {
     // No foreground: underline/highlight layer on top of whatever else applies (bold, italic, ...).
     rule(["markup.underline"], undefined, { underline: true }),
     rule(["markup.highlight"], t.background, { background: t.markdownEmph, bold: true }),
+    rule(["markup.math"], t.info),
     rule(["comment.error"], t.error, { italic: true, bold: true }),
     rule(["comment.warning"], t.warning, { italic: true, bold: true }),
     rule(["comment.todo", "comment.note"], t.info, { italic: true, bold: true }),

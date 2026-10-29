@@ -1,4 +1,5 @@
 import { MarkdownRenderable, StyledText, TextAttributes, TextRenderable } from "@opentui/core"
+import { MATH_CLOSE, MATH_OPEN } from "./math/markdown"
 
 // OpenTUI's MarkdownRenderable is what opencode uses to render assistant
 // messages. It covers CommonMark/GFM, but a few things a document reader wants
@@ -6,6 +7,7 @@ import { MarkdownRenderable, StyledText, TextAttributes, TextRenderable } from "
 // JS-visible) prototype methods:
 //
 //  * underline via <u>/<ins>, highlight via ==text== or <mark>
+//  * styling for math rendered by math/markdown.ts (wrapped in marker characters)
 //  * nicer list markers: per-depth bullets, ☐/☑ task checkboxes, coloured numbers
 //  * blockquote bar tinted with the quote colour
 //  * instant first paint: blocks show a marked-based preview while tree-sitter loads
@@ -18,11 +20,16 @@ type ListInput = { item: any; marker: string; markerWidth: number; id: string; g
 
 const proto = MarkdownRenderable.prototype as any
 
-const INLINE_RULES: { re: RegExp; group: string }[] = [
-  { re: /<(u|ins)>([\s\S]+?)<\/\1>/g, group: "markup.underline" },
-  { re: /<(mark)>([\s\S]+?)<\/\1>/g, group: "markup.highlight" },
-  { re: /(==)(?=\S)([\s\S]+?)(?<=\S)==(?!=)/g, group: "markup.highlight" },
+/** Inline spans styled on top of tree-sitter: `open`/`close` are the delimiter lengths to hide. */
+const INLINE_RULES: { re: RegExp; group: string; open: (m: RegExpExecArray) => number; close: (m: RegExpExecArray) => number }[] = [
+  { re: /<(u|ins)>([\s\S]+?)<\/\1>/g, group: "markup.underline", open: (m) => m[1]!.length + 2, close: (m) => m[1]!.length + 3 },
+  { re: /<(mark)>([\s\S]+?)<\/\1>/g, group: "markup.highlight", open: () => 6, close: () => 7 },
+  { re: /==(?=\S)[\s\S]+?(?<=\S)==(?!=)/g, group: "markup.highlight", open: () => 2, close: () => 2 },
+  { re: new RegExp(`${MATH_OPEN}[^${MATH_CLOSE}]*${MATH_CLOSE}`, "g"), group: "markup.math", open: () => 1, close: () => 1 },
 ]
+
+/** Splits text on ==highlight== and math spans, for paths that render marked tokens. */
+const MARKED_SPAN = new RegExp(`(==(?=\\S)[\\s\\S]+?(?<=\\S)==|${MATH_OPEN}[^${MATH_CLOSE}]*${MATH_CLOSE})`)
 
 const BULLETS = ["•", "◦", "▸"]
 
@@ -31,19 +38,20 @@ const BULLETS = ["•", "◦", "▸"]
 const origAddHighlights = proto.addMarkdownLinkHighlights
 proto.addMarkdownLinkHighlights = function (highlights: Highlight[], content: string): Highlight[] {
   const result: Highlight[] = origAddHighlights.call(this, highlights, content)
-  if (!/<(u|ins|mark)>|==/.test(content)) return result
+  if (!/<(u|ins|mark)>|==/.test(content) && !content.includes(MATH_OPEN)) return result
 
   // Never style inside code spans/blocks.
   const raw = result.filter(([s, e, g]) => g.startsWith("markup.raw") && e > s)
   const inRaw = (pos: number) => raw.some(([s, e]) => pos >= s && pos < e)
 
   const extra: Highlight[] = []
-  for (const { re, group } of INLINE_RULES) {
+  for (const rule of INLINE_RULES) {
+    const { re, group } = rule
     re.lastIndex = 0
     for (let m = re.exec(content); m; m = re.exec(content)) {
       if (inRaw(m.index)) continue
-      const open = m[1] === "==" ? 2 : m[1]!.length + 2
-      const close = m[1] === "==" ? 2 : m[1]!.length + 3
+      const open = rule.open(m)
+      const close = rule.close(m)
       const start = m.index
       const end = start + m[0].length
       // "conceal.tag" rather than "conceal": OpenTUI eats the space after a plain "conceal" range.
@@ -62,7 +70,8 @@ const TAG_RE = /^<(\/?)(u|ins|mark)\s*>$/i
 
 const origRenderInlineContent = proto.renderInlineContent
 proto.renderInlineContent = function (tokens: any[], chunks: Chunk[], link?: unknown) {
-  if (!tokens.some((t) => t.type === "html" || (t.type === "text" && t.text.includes("==")))) {
+  const hasSpan = (text: string) => text.includes("==") || text.includes(MATH_OPEN)
+  if (!tokens.some((t) => t.type === "html" || (t.type === "text" && hasSpan(t.text)))) {
     return origRenderInlineContent.call(this, tokens, chunks, link)
   }
   let underline = 0
@@ -89,11 +98,16 @@ proto.renderInlineContent = function (tokens: any[], chunks: Chunk[], link?: unk
       if (!this._conceal) chunks.push(this.createChunk(token.raw, "tag", link))
       continue
     }
-    if (token.type === "text" && token.text.includes("==")) {
-      const parts = token.text.split(/(==(?=\S)[\s\S]+?(?<=\S)==)/)
+    if (token.type === "text" && hasSpan(token.text)) {
+      const parts = token.text.split(MARKED_SPAN)
       for (const part of parts) {
         if (!part) continue
         const before = chunks.length
+        if (part.startsWith(MATH_OPEN)) {
+          chunks.push(this.createChunk(part.slice(1, -1), "markup.math", link))
+          decorate(before)
+          continue
+        }
         const isMark = part.length > 4 && part.startsWith("==") && part.endsWith("==")
         const text = isMark && this._conceal ? part.slice(2, -2) : part
         chunks.push(this.createChunk(text, "default", link))

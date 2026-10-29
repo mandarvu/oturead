@@ -1,3 +1,5 @@
+import { MATH_CLOSE, MATH_OPEN, replaceInlineMath } from "./math/markdown"
+
 // The document's heading structure: drives the table of contents, the
 // breadcrumb and section folding.
 
@@ -23,12 +25,19 @@ export type Section = {
 const ATX_HEADING = /^ {0,3}(#{1,6})(?:[ \t]+(.*?))?(?:[ \t]+#+)?[ \t]*$/
 const FENCE = /^ {0,3}(`{3,}|~{3,})/
 
-/** Heading text with inline markdown (emphasis, code, links, tags) removed. */
+/** Heading text with inline markdown (emphasis, code, links, tags) removed and math rendered. */
 export function plainHeading(text: string): string {
-  return text
-    .replace(/<\/?[a-z]+>/gi, "")
-    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
-    .replace(/[*_`~=]+/g, "")
+  return replaceInlineMath(text, (math) => MATH_OPEN + math + MATH_CLOSE)
+    .split(new RegExp(`(${MATH_OPEN}[^${MATH_CLOSE}]*${MATH_CLOSE})`))
+    .map((part) =>
+      part.startsWith(MATH_OPEN)
+        ? part.slice(1, -1)
+        : part
+            .replace(/<\/?[a-z]+>/gi, "")
+            .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
+            .replace(/[*_`~=]+/g, ""),
+    )
+    .join("")
     .trim()
 }
 
