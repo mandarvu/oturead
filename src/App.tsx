@@ -292,6 +292,10 @@ export function App({ source, themes, initialTheme, initialMode, onExit }: AppPr
 
       <scrollbox
         ref={scrollRef}
+        // Keys are handled globally below. If the scrollbox could take focus (the
+        // renderer focuses on click), its own j/k/PgUp/... handling would run as well
+        // and every keypress would scroll twice.
+        focusable={false}
         flexGrow={1}
         scrollY
         scrollX={false}
