@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { useKeyboard, useRenderer, useSelectionHandler, useTerminalDimensions } from "@opentui/react"
 import type { MarkdownRenderable, ScrollBoxRenderable } from "@opentui/core"
 import { generateSyntax, resolveTheme, type Mode, type ThemeJson } from "./theme"
+import { leadingBlocks } from "./progressive"
 import type { Source } from "./source"
 
 interface AppProps {
@@ -40,6 +41,17 @@ export function App({ source, themes, initialTheme, initialMode, onExit }: AppPr
   const renderer = useRenderer()
   const { width, height } = useTerminalDimensions()
   const doc = useSyncExternalStore(source.subscribe, source.get)
+
+  // Large documents: build the first few screens, paint them, then the rest.
+  const [progressive, setProgressive] = useState(true)
+  useEffect(() => {
+    const done = () => setProgressive(false)
+    renderer.once("frame", done)
+    return () => {
+      renderer.off("frame", done)
+    }
+  }, [renderer])
+  const content = progressive && !doc.streaming ? leadingBlocks(doc.content, height * 2) : doc.content
   const scrollRef = useRef<ScrollBoxRenderable>(null)
   const markdownRef = useRef<MarkdownRenderable>(null)
 
@@ -236,7 +248,7 @@ export function App({ source, themes, initialTheme, initialMode, onExit }: AppPr
         <markdown
           key={`${themeName}:${mode}:${conceal}`}
           ref={markdownRef}
-          content={doc.content}
+          content={content}
           syntaxStyle={syntax}
           streaming={doc.streaming}
           internalBlockMode="top-level"
