@@ -8,6 +8,7 @@ import { MarkdownRenderable, StyledText, TextAttributes, TextRenderable } from "
 //  * underline via <u>/<ins>, highlight via ==text== or <mark>
 //  * nicer list markers: per-depth bullets, ☐/☑ task checkboxes, coloured numbers
 //  * blockquote bar tinted with the quote colour
+//  * instant first paint: blocks show a marked-based preview while tree-sitter loads
 //
 // Everything here is additive: each wrapper calls the original first.
 
@@ -154,4 +155,34 @@ proto.applyListItemMarker = function (row: any, input: ListInput) {
 const origQuoteBorder = proto.getBlockquoteBorderColor
 proto.getBlockquoteBorderColor = function () {
   return this.getStyle("markup.quote")?.fg ?? origQuoteBorder.call(this)
+}
+
+// --- instant first paint ---------------------------------------------------
+// Prose blocks are highlighted by tree-sitter in a worker and draw nothing
+// until it answers. While streaming, OpenTUI shows a marked-based preview in
+// the meantime; enable that preview for static documents too so text appears
+// on the first frame and colours fill in a moment later.
+
+const origInitialStyledText = proto.createInitialStyledText
+proto.createInitialStyledText = function (token: any) {
+  const streaming = this._streaming
+  this._streaming = true // the original only builds the preview while streaming
+  let styled: StyledText | undefined
+  try {
+    styled = origInitialStyledText.call(this, token)
+  } finally {
+    this._streaming = streaming
+  }
+  // The preview renders inline tokens only; give headings their colour up front.
+  if (styled && token.type === "heading") {
+    const style = this.getStyle(`markup.heading.${token.depth}`) ?? this.getStyle("markup.heading")
+    if (style) {
+      const attrs = (style.bold ? TextAttributes.BOLD : 0) | (style.underline ? TextAttributes.UNDERLINE : 0)
+      for (const chunk of styled.chunks as Chunk[]) {
+        chunk.fg = style.fg ?? chunk.fg
+        chunk.attributes = (chunk.attributes ?? 0) | attrs
+      }
+    }
+  }
+  return styled
 }
