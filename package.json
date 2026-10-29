@@ -11,7 +11,8 @@
     "demo": "bun run src/index.tsx --simulate examples/showcase.md",
     "build": "bun build --compile src/index.tsx --outfile dist/oturead",
     "typecheck": "tsc --noEmit",
-    "snapshot": "bun scripts/snapshot.tsx"
+    "snapshot": "bun scripts/snapshot.tsx",
+    "test": "bun test"
   },
   "dependencies": {
     "@opentui/core": "^0.5.2",
