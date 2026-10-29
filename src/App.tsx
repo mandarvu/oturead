@@ -3,6 +3,8 @@ import { useKeyboard, useRenderer, useSelectionHandler, useTerminalDimensions } 
 import type { MarkdownRenderable, ScrollBoxRenderable } from "@opentui/core"
 import { generateSyntax, resolveTheme, type Mode, type ThemeJson } from "./theme"
 import { openInEditor } from "./editor"
+import { foldMarkdown } from "./fold"
+import { ancestry, parseOutline, sectionAt, type Section } from "./outline"
 import { followLine, lineAtRow, locateBlocks, rowOfLine, type BlockSpan } from "./position"
 import { leadingBlocks } from "./progressive"
 import { ThemePicker } from "./ThemePicker"
@@ -16,14 +18,15 @@ interface AppProps {
   onExit: () => void
 }
 
-type Heading = { level: number; text: string; offset: number }
-
 const HELP: [string, string][] = [
   ["j / k  ↓ / ↑", "scroll line"],
   ["d / u  ^d / ^u", "half page"],
   ["space / b  PgDn / PgUp", "full page"],
   ["g / G  Home / End", "top / bottom"],
   ["] / [  n / p", "next / previous heading"],
+  ["z", "fold / unfold this section"],
+  ["1-6 / 0", "fold to depth N / unfold all"],
+  ["Z", "fold all / unfold all"],
   ["e", "edit in $EDITOR at this line"],
   ["t", "pick theme (fuzzy search)"],
   ["m", "toggle dark / light"],
@@ -33,12 +36,12 @@ const HELP: [string, string][] = [
   ["q  ^c", "quit"],
 ]
 
-function plainHeading(text: string) {
-  return text
-    .replace(/<\/?[a-z]+>/gi, "")
-    .replace(/[*_`~=]+/g, "")
-    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
-    .trim()
+/** Shallowest outline depth with more than one section: "fold all" folds there. */
+function overviewDepth(outline: Section[]): number {
+  for (let depth = 1; depth <= 6; depth++) {
+    if (outline.filter((s) => s.depth === depth).length > 1) return depth
+  }
+  return 1
 }
 
 export function App({ source, themes, initialTheme, initialMode, onExit }: AppProps) {
@@ -55,7 +58,16 @@ export function App({ source, themes, initialTheme, initialMode, onExit }: AppPr
       renderer.off("frame", done)
     }
   }, [renderer])
-  const content = progressive && !doc.streaming ? leadingBlocks(doc.content, height * 2) : doc.content
+
+  // Collapsed sections are removed from the markdown before rendering.
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set())
+  const outline = useMemo(() => parseOutline(doc.content), [doc.content])
+  const folded = useMemo(() => foldMarkdown(doc.content, outline, collapsed), [doc.content, outline, collapsed])
+  // Ids of sections that no longer exist (after an edit) don't count.
+  const foldCount = useMemo(() => outline.filter((s) => s.hasBody && collapsed.has(s.id)).length, [outline, collapsed])
+  const foldedRef = useRef(folded)
+  foldedRef.current = folded
+  const content = progressive && !doc.streaming ? leadingBlocks(folded.content, height * 2) : folded.content
   const scrollRef = useRef<ScrollBoxRenderable>(null)
   const markdownRef = useRef<MarkdownRenderable>(null)
 
@@ -66,7 +78,7 @@ export function App({ source, themes, initialTheme, initialMode, onExit }: AppPr
   const [showHelp, setShowHelp] = useState(false)
   const [pickerOrigin, setPickerOrigin] = useState<string>() // theme to restore if the picker is cancelled
   const [scrollPct, setScrollPct] = useState(0)
-  const [section, setSection] = useState<Heading[]>([])
+  const [currentLine, setCurrentLine] = useState(0) // source line at the top of the viewport
   const [toast, setToast] = useState<string>()
   const savedScroll = useRef<number | undefined>(undefined)
 
@@ -97,20 +109,18 @@ export function App({ source, themes, initialTheme, initialMode, onExit }: AppPr
 
   // Top-level markdown blocks are separate renderables, so headings can be
   // located by walking the block list and measuring their positions.
-  const headings = useCallback((): Heading[] => {
+  const headingOffsets = useCallback((): number[] => {
     const md = markdownRef.current as any
     const box = scrollRef.current
     if (!md || !box) return []
     const base = box.content.y
-    const out: Heading[] = []
-    for (const state of md._blockStates ?? []) {
-      if (state.token?.type !== "heading") continue
-      out.push({ level: state.token.depth, text: plainHeading(state.token.text), offset: state.renderable.y - base })
-    }
-    return out
+    return (md._blockStates ?? [])
+      .filter((state: any) => state.token?.type === "heading")
+      .map((state: any) => state.renderable.y - base)
   }, [])
 
-  // Source line + rendered position of every top-level block.
+  // Source line + rendered position of every top-level block. Lines are in
+  // the original document, mapped back through any folding.
   const blockSpans = useCallback((): BlockSpan[] => {
     const md = markdownRef.current as any
     const box = scrollRef.current
@@ -119,7 +129,8 @@ export function App({ source, themes, initialTheme, initialMode, onExit }: AppPr
     const located = locateBlocks(md.content, states.map((state) => state.tokenRaw ?? state.token?.raw ?? ""))
     const base = box.content.y
     return states.map((state, i) => ({
-      ...located[i]!,
+      line: foldedRef.current.toSource(located[i]!.line),
+      lines: located[i]!.lines,
       offset: state.renderable.y - base,
       height: Math.max(1, state.renderable.height),
     }))
@@ -131,15 +142,8 @@ export function App({ source, themes, initialTheme, initialMode, onExit }: AppPr
     const maxScroll = box.scrollHeight - box.viewport.height
     setScrollPct(maxScroll <= 0 ? 100 : Math.min(100, Math.round((box.scrollTop / maxScroll) * 100)))
 
-    // Breadcrumb of the section containing the top of the viewport.
-    const trail: Heading[] = []
-    for (const heading of headings()) {
-      if (heading.offset > box.scrollTop + 1) break
-      while (trail.length && trail[trail.length - 1]!.level >= heading.level) trail.pop()
-      trail.push(heading)
-    }
-    setSection(trail)
-  }, [headings])
+    setCurrentLine(lineAtRow(blockSpans(), box.scrollTop))
+  }, [blockSpans])
 
   useEffect(() => {
     const box = scrollRef.current
@@ -154,7 +158,25 @@ export function App({ source, themes, initialTheme, initialMode, onExit }: AppPr
   useEffect(() => {
     const timer = setTimeout(refreshStatus, 30)
     return () => clearTimeout(timer)
-  }, [doc, themeName, mode, conceal, width, height, refreshStatus])
+  }, [content, themeName, mode, conceal, width, height, refreshStatus])
+
+  // Scroll to a source line once the next content change has been laid out
+  // (block positions are only final then). `heading` leaves a row of context.
+  const pendingScroll = useRef<{ line: number; heading: boolean } | undefined>(undefined)
+  useEffect(() => {
+    const target = pendingScroll.current
+    if (!target) return
+    pendingScroll.current = undefined
+    const restore = () => {
+      const row = rowOfLine(blockSpans(), target.line)
+      scrollRef.current?.scrollTo(Math.max(0, target.heading ? row - 1 : row))
+      refreshStatus()
+    }
+    renderer.once("frame", restore)
+    return () => {
+      renderer.off("frame", restore)
+    }
+  }, [content, renderer, blockSpans, refreshStatus])
 
   // Open the file in $EDITOR at the line at the top of the viewport, then come
   // back to that line once the editor exits.
@@ -180,17 +202,43 @@ export function App({ source, themes, initialTheme, initialMode, onExit }: AppPr
     if (!target) return
     returnTo.current = undefined
     if (target.content === doc.content) return // unchanged: we're already there
-    const line = followLine(target.content, doc.content, target.line)
-    const restore = () => {
-      scrollRef.current?.scrollTo(rowOfLine(blockSpans(), line))
-      refreshStatus()
-    }
-    // Block positions are only final once the new content has been laid out.
-    renderer.once("frame", restore)
-    return () => {
-      renderer.off("frame", restore)
-    }
-  }, [doc, renderer, blockSpans, refreshStatus])
+    pendingScroll.current = { line: followLine(target.content, doc.content, target.line), heading: false }
+  }, [doc])
+
+  // --- folding ---------------------------------------------------------------
+
+  const setFolds = (next: Set<string>, anchor: { line: number; heading: boolean }) => {
+    if (next.size === collapsed.size && [...next].every((id) => collapsed.has(id))) return
+    pendingScroll.current = anchor
+    setCollapsed(next)
+  }
+
+  /** Folds or unfolds the section at index `i` and puts its heading at the top. */
+  const toggleSection = (i: number) => {
+    const section = outline[i]
+    if (!section?.hasBody) return
+    const next = new Set(collapsed)
+    if (!next.delete(section.id)) next.add(section.id)
+    setFolds(next, { line: section.line, heading: true })
+  }
+
+  const toggleCurrentSection = () => {
+    let i = sectionAt(outline, currentLine)
+    while (i >= 0 && !outline[i]!.hasBody) i = outline[i]!.parent ?? -1
+    if (i < 0) return setToast("no section here to fold")
+    toggleSection(i)
+  }
+
+  /** Collapses every section at outline depth `depth`, keeping the reader in their section. */
+  const foldToDepth = (depth: number) => {
+    const next = new Set(outline.filter((s) => s.depth === depth && s.hasBody).map((s) => s.id))
+    const here = ancestry(outline, sectionAt(outline, currentLine))
+    const anchor = here.find((i) => outline[i]!.depth === depth)
+    setFolds(next, anchor === undefined ? { line: currentLine, heading: false } : { line: outline[anchor]!.line, heading: true })
+    setToast(next.size ? `folded to depth ${depth}` : "nothing to fold")
+  }
+
+  const unfoldAll = () => setFolds(new Set(), { line: currentLine, heading: false })
 
   useSelectionHandler((selection) => {
     if (selection.isDragging) return
@@ -202,13 +250,13 @@ export function App({ source, themes, initialTheme, initialMode, onExit }: AppPr
   const jumpHeading = (direction: 1 | -1) => {
     const box = scrollRef.current
     if (!box) return
-    const list = headings()
+    const offsets = headingOffsets()
     const current = box.scrollTop
     const target =
       direction === 1
-        ? list.find((h) => h.offset > current + 1)
-        : [...list].reverse().find((h) => h.offset < current - 1)
-    if (target) box.scrollTo(Math.max(0, target.offset - 1))
+        ? offsets.find((offset) => offset > current + 1)
+        : [...offsets].reverse().find((offset) => offset < current - 1)
+    if (target !== undefined) box.scrollTo(Math.max(0, target - 1))
     else box.scrollTo(direction === 1 ? box.scrollHeight : 0)
   }
 
@@ -253,6 +301,10 @@ export function App({ source, themes, initialTheme, initialMode, onExit }: AppPr
     if (key.name === "e") return editAtViewport()
     if (key.name === "m") return restyle(() => setMode((m) => (m === "dark" ? "light" : "dark")))
     if (key.name === "r") return restyle(() => setConceal((c) => !c))
+    if (seq === "z") return toggleCurrentSection()
+    if (seq === "Z") return foldCount ? unfoldAll() : foldToDepth(overviewDepth(outline))
+    if (seq === "0") return unfoldAll()
+    if (seq >= "1" && seq <= "6" && seq.length === 1) return foldToDepth(Number(seq))
     if (!box) return
 
     const page = box.viewport.height
@@ -270,8 +322,11 @@ export function App({ source, themes, initialTheme, initialMode, onExit }: AppPr
     refreshStatus()
   })
 
-  const crumb = section.map((h) => h.text).join(" › ")
-  const status = doc.streaming ? "● streaming" : `${scrollPct}%`
+  const crumb = ancestry(outline, sectionAt(outline, currentLine))
+    .map((i) => outline[i]!.text)
+    .join(" › ")
+  const status =
+    (doc.streaming ? "● streaming" : `${scrollPct}%`) + (foldCount ? ` · ${foldCount} folded` : "")
 
   return (
     <box width={width} height={height} flexDirection="column" backgroundColor={theme.background}>
