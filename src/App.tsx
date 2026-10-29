@@ -1,97 +1,283 @@
-import React, { useRef, useState, useCallback } from "react"
-import { useKeyboard, useTerminalDimensions } from "@opentui/react"
-import { SyntaxStyle } from "@opentui/core"
-import type { ScrollBoxRenderable } from "@opentui/core"
-
-const syntaxStyle = SyntaxStyle.create()
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
+import { useKeyboard, useRenderer, useSelectionHandler, useTerminalDimensions } from "@opentui/react"
+import type { MarkdownRenderable, ScrollBoxRenderable } from "@opentui/core"
+import { generateSyntax, resolveTheme, type Mode, type ThemeJson } from "./theme"
+import type { Source } from "./source"
 
 interface AppProps {
-  content: string
-  filename: string
+  source: Source
+  themes: Record<string, ThemeJson>
+  initialTheme: string
+  initialMode: Mode
+  onExit: () => void
 }
 
-export function App({ content, filename }: AppProps) {
-  const scrollRef = useRef<ScrollBoxRenderable>(null)
-  const [scrollPct, setScrollPct] = useState(0)
-  const { width, height } = useTerminalDimensions()
+type Heading = { level: number; text: string; offset: number }
 
-  const updateScrollPct = useCallback(() => {
+const HELP: [string, string][] = [
+  ["j / k  ↓ / ↑", "scroll line"],
+  ["d / u  ^d / ^u", "half page"],
+  ["space / b  PgDn / PgUp", "full page"],
+  ["g / G  Home / End", "top / bottom"],
+  ["] / [  n / p", "next / previous heading"],
+  ["t / T", "next / previous theme"],
+  ["m", "toggle dark / light"],
+  ["r", "toggle rendered / raw markdown"],
+  ["mouse drag", "select & copy (OSC 52)"],
+  ["?", "toggle this help"],
+  ["q  ^c", "quit"],
+]
+
+function plainHeading(text: string) {
+  return text
+    .replace(/<\/?[a-z]+>/gi, "")
+    .replace(/[*_`~=]+/g, "")
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .trim()
+}
+
+export function App({ source, themes, initialTheme, initialMode, onExit }: AppProps) {
+  const renderer = useRenderer()
+  const { width, height } = useTerminalDimensions()
+  const doc = useSyncExternalStore(source.subscribe, source.get)
+  const scrollRef = useRef<ScrollBoxRenderable>(null)
+  const markdownRef = useRef<MarkdownRenderable>(null)
+
+  const themeNames = useMemo(() => Object.keys(themes).sort(), [themes])
+  const [themeName, setThemeName] = useState(themes[initialTheme] ? initialTheme : "opencode")
+  const [mode, setMode] = useState<Mode>(initialMode)
+  const [conceal, setConceal] = useState(true)
+  const [showHelp, setShowHelp] = useState(false)
+  const [scrollPct, setScrollPct] = useState(0)
+  const [section, setSection] = useState<Heading[]>([])
+  const [toast, setToast] = useState<string>()
+  const savedScroll = useRef<number | undefined>(undefined)
+
+  const theme = useMemo(() => resolveTheme(themes[themeName]!, mode), [themes, themeName, mode])
+  const syntax = useMemo(() => generateSyntax(theme), [theme])
+  useEffect(() => () => syntax.destroy(), [syntax])
+
+  useEffect(() => {
+    renderer.setBackgroundColor(theme.background)
+  }, [renderer, theme])
+
+  useEffect(() => {
+    if (!toast) return
+    const timer = setTimeout(() => setToast(undefined), 1500)
+    return () => clearTimeout(timer)
+  }, [toast])
+
+  // Top-level markdown blocks are separate renderables, so headings can be
+  // located by walking the block list and measuring their positions.
+  const headings = useCallback((): Heading[] => {
+    const md = markdownRef.current as any
+    const box = scrollRef.current
+    if (!md || !box) return []
+    const base = box.content.y
+    const out: Heading[] = []
+    for (const state of md._blockStates ?? []) {
+      if (state.token?.type !== "heading") continue
+      out.push({ level: state.token.depth, text: plainHeading(state.token.text), offset: state.renderable.y - base })
+    }
+    return out
+  }, [])
+
+  const refreshStatus = useCallback(() => {
     const box = scrollRef.current
     if (!box) return
-    const maxScroll = box.scrollHeight - box.height
-    if (maxScroll <= 0) {
-      setScrollPct(100)
-      return
+    const maxScroll = box.scrollHeight - box.viewport.height
+    setScrollPct(maxScroll <= 0 ? 100 : Math.min(100, Math.round((box.scrollTop / maxScroll) * 100)))
+
+    // Breadcrumb of the section containing the top of the viewport.
+    const trail: Heading[] = []
+    for (const heading of headings()) {
+      if (heading.offset > box.scrollTop + 1) break
+      while (trail.length && trail[trail.length - 1]!.level >= heading.level) trail.pop()
+      trail.push(heading)
     }
-    setScrollPct(Math.round((box.scrollTop / maxScroll) * 100))
-  }, [])
+    setSection(trail)
+  }, [headings])
+
+  useEffect(() => {
+    const box = scrollRef.current
+    if (!box) return
+    box.verticalScrollBar.on("change", refreshStatus)
+    return () => {
+      box.verticalScrollBar.off("change", refreshStatus)
+    }
+  }, [refreshStatus])
+
+  // Re-measure once layout settles after content/theme/size changes.
+  useEffect(() => {
+    const timer = setTimeout(refreshStatus, 30)
+    return () => clearTimeout(timer)
+  }, [doc, themeName, mode, conceal, width, height, refreshStatus])
+
+  useSelectionHandler((selection) => {
+    if (selection.isDragging) return
+    const text = selection.getSelectedText()
+    if (!text) return
+    if (renderer.copyToClipboardOSC52(text)) setToast(`copied ${text.length} chars`)
+  })
+
+  const jumpHeading = (direction: 1 | -1) => {
+    const box = scrollRef.current
+    if (!box) return
+    const list = headings()
+    const current = box.scrollTop
+    const target =
+      direction === 1
+        ? list.find((h) => h.offset > current + 1)
+        : [...list].reverse().find((h) => h.offset < current - 1)
+    if (target) box.scrollTo(Math.max(0, target.offset - 1))
+    else box.scrollTo(direction === 1 ? box.scrollHeight : 0)
+  }
+
+  // OpenTUI doesn't restyle nested list items when the syntax style changes, so
+  // style changes remount the markdown; remember where we were to restore it.
+  const restyle = (apply: () => void) => {
+    const box = scrollRef.current
+    if (box && box.scrollHeight > 0) savedScroll.current = box.scrollTop / box.scrollHeight
+    apply()
+  }
+
+  useEffect(() => {
+    const ratio = savedScroll.current
+    if (ratio === undefined) return
+    savedScroll.current = undefined
+    const timer = setTimeout(() => {
+      const box = scrollRef.current
+      if (box) box.scrollTo(Math.round(ratio * box.scrollHeight))
+      refreshStatus()
+    }, 50)
+    return () => clearTimeout(timer)
+  }, [themeName, mode, conceal, refreshStatus])
+
+  const cycleTheme = (direction: 1 | -1) => {
+    const index = themeNames.indexOf(themeName)
+    const next = themeNames[(index + direction + themeNames.length) % themeNames.length]!
+    setThemeName(next)
+    setToast(`theme: ${next}`)
+  }
 
   useKeyboard((key) => {
     const box = scrollRef.current
-
-    if (key.name === "q") {
-      process.exit(0)
-      return
-    }
-
+    const seq = key.sequence
+    if (key.name === "q" || (key.ctrl && key.name === "c")) return onExit()
+    if (key.name === "escape" && showHelp) return setShowHelp(false)
+    if (seq === "?") return setShowHelp((v) => !v)
+    if (key.name === "t") return restyle(() => cycleTheme(key.shift ? -1 : 1))
+    if (key.name === "m") return restyle(() => setMode((m) => (m === "dark" ? "light" : "dark")))
+    if (key.name === "r") return restyle(() => setConceal((c) => !c))
     if (!box) return
 
-    if (key.name === "j" || key.name === "down") {
-      box.scrollBy(3)
-    } else if (key.name === "k" || key.name === "up") {
-      box.scrollBy(-3)
-    } else if (key.name === "d" || key.name === "f" || key.name === "pagedown") {
-      box.scrollBy(0.5, "viewport")
-    } else if (key.name === "u" || key.name === "b" || key.name === "pageup") {
-      box.scrollBy(-0.5, "viewport")
-    } else if (key.name === "g" && !key.shift) {
-      box.scrollTo(0)
-    } else if (key.name === "g" && key.shift) {
-      box.scrollTo(999999)
-    } else if (key.name === "home") {
-      box.scrollTo(0)
-    } else if (key.name === "end") {
-      box.scrollTo(999999)
-    } else {
-      return
-    }
-
-    updateScrollPct()
+    const page = box.viewport.height
+    if (key.name === "j" || key.name === "down") box.scrollBy(1)
+    else if (key.name === "k" || key.name === "up") box.scrollBy(-1)
+    else if (key.name === "d") box.scrollBy(Math.floor(page / 2))
+    else if (key.name === "u") box.scrollBy(-Math.floor(page / 2))
+    else if (key.name === "space" || key.name === "f" || key.name === "pagedown") box.scrollBy(page - 2)
+    else if (key.name === "b" || key.name === "pageup") box.scrollBy(-(page - 2))
+    else if (seq === "G" || key.name === "end") box.scrollTo(box.scrollHeight)
+    else if (key.name === "g" || key.name === "home") box.scrollTo(0)
+    else if (seq === "]" || key.name === "n") jumpHeading(1)
+    else if (seq === "[" || key.name === "p") jumpHeading(-1)
+    else return
+    refreshStatus()
   })
 
-  const TITLE_BAR_H = 1
-  const STATUS_BAR_H = 1
-  const contentAreaH = height - TITLE_BAR_H - STATUS_BAR_H
+  const crumb = section.map((h) => h.text).join(" › ")
+  const status = doc.streaming ? "● streaming" : `${scrollPct}%`
 
   return (
-    <box width={width} height={height} flexDirection="column">
-      <box width={width} height={TITLE_BAR_H}>
-        <text content={` oturead — ${filename}`} width={width} />
+    <box width={width} height={height} flexDirection="column" backgroundColor={theme.background}>
+      <box height={1} flexDirection="row" paddingX={1} backgroundColor={theme.backgroundPanel}>
+        <text fg={theme.primary} flexShrink={0}>
+          <b>{source.title}</b>
+        </text>
+        <box flexGrow={1} flexShrink={1} paddingX={2} overflow="hidden">
+          <text fg={theme.textMuted} wrapMode="none">
+            {crumb ? `› ${crumb}` : ""}
+          </text>
+        </box>
+        <text fg={theme.textMuted} flexShrink={0}>
+          {themeName} · {mode}
+          {conceal ? "" : " · raw"}
+        </text>
       </box>
 
       <scrollbox
         ref={scrollRef}
-        width={width}
-        height={contentAreaH}
-        scrollY={true}
+        flexGrow={1}
+        scrollY
         scrollX={false}
+        stickyScroll={doc.streaming}
+        stickyStart="bottom"
+        viewportOptions={{ paddingRight: 1 }}
+        verticalScrollbarOptions={{
+          paddingLeft: 1,
+          trackOptions: {
+            backgroundColor: theme.backgroundElement,
+            foregroundColor: theme.border,
+          },
+        }}
       >
         <markdown
-          content={content}
-          syntaxStyle={syntaxStyle}
-          width={width}
+          key={`${themeName}:${mode}:${conceal}`}
+          ref={markdownRef}
+          content={doc.content}
+          syntaxStyle={syntax}
+          streaming={doc.streaming}
+          internalBlockMode="top-level"
+          tableOptions={{ style: "grid", cellPaddingX: 1, borderColor: theme.border }}
+          conceal={conceal}
+          fg={theme.markdownText}
+          bg={theme.background}
           paddingX={2}
-          paddingBottom={2}
-          conceal={true}
+          paddingTop={1}
+          paddingBottom={1}
         />
       </scrollbox>
 
-      <box width={width} height={STATUS_BAR_H}>
-        <text
-          content={` ${scrollPct}%  q:quit  j/k:↓↑  d/f/u/b:page  g/G:top/bot`}
-          width={width}
-        />
+      <box height={1} flexDirection="row" paddingX={1} backgroundColor={theme.backgroundPanel}>
+        <text fg={doc.streaming ? theme.success : theme.textMuted} flexShrink={0}>
+          {status}
+        </text>
+        <box flexGrow={1} flexShrink={1} paddingX={2} overflow="hidden">
+          <text fg={theme.warning} wrapMode="none">
+            {toast ?? ""}
+          </text>
+        </box>
+        <text fg={theme.textMuted} flexShrink={0}>
+          ? help · ]/[ sections · t theme · q quit
+        </text>
       </box>
+
+      {showHelp && (
+        <box
+          position="absolute"
+          top={Math.max(1, Math.floor((height - HELP.length - 4) / 2))}
+          left={Math.max(0, Math.floor((width - 60) / 2))}
+          width={Math.min(60, width)}
+          border
+          borderStyle="rounded"
+          borderColor={theme.borderActive}
+          backgroundColor={theme.backgroundPanel}
+          title=" keys "
+          titleAlignment="center"
+          flexDirection="column"
+          paddingX={1}
+        >
+          {HELP.map(([keys, action]) => (
+            <box key={keys} flexDirection="row" backgroundColor={theme.backgroundPanel}>
+              <text fg={theme.accent} width={24} flexShrink={0}>
+                {keys}
+              </text>
+              <text fg={theme.text}>{action}</text>
+            </box>
+          ))}
+        </box>
+      )}
     </box>
   )
 }

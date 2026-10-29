@@ -3,8 +3,15 @@
   "module": "src/index.tsx",
   "type": "module",
   "private": true,
+  "bin": {
+    "oturead": "src/index.tsx"
+  },
   "scripts": {
-    "dev": "bun run src/index.tsx"
+    "dev": "bun run src/index.tsx",
+    "demo": "bun run src/index.tsx --simulate examples/showcase.md",
+    "build": "bun build --compile src/index.tsx --outfile dist/oturead",
+    "typecheck": "tsc --noEmit",
+    "snapshot": "bun scripts/snapshot.tsx"
   },
   "dependencies": {
     "@opentui/core": "^0.5.2",
