@@ -337,15 +337,16 @@ function kindOf(node: MathNode): Kind {
 /** Interleaves items with spaces around binary operators and relations, like TeX. */
 function spaced<T>(items: MathNode[], render: (node: MathNode) => T, space: () => T, script: boolean): T[] {
   const out: T[] = []
-  let prev: Kind | undefined
+  let prev: Kind | "unary" | undefined
   for (const item of items) {
-    let kind = kindOf(item)
+    let kind: Kind | "unary" = kindOf(item)
     if (kind === "bin" && (prev === undefined || prev === "bin" || prev === "rel" || prev === "open" || prev === "punct" || prev === "op")) {
-      kind = "ord" // unary minus/plus
+      kind = "unary" // −x, −sin θ: binds to what follows
     }
     const gap =
       !script &&
       prev !== undefined &&
+      prev !== "unary" &&
       prev !== "space" &&
       kind !== "space" &&
       (kind === "bin" ||

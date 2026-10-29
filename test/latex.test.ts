@@ -52,3 +52,7 @@ describe("renderDisplay", () => {
     expect(renderDisplay("\\sqrt{x+1}")).toEqual([" ▁▁▁▁▁", "√x + 1"])
   })
 })
+
+test("a unary minus binds to what follows", () => {
+  expect(renderInline("-\\sin\\theta + (-x)")).toBe("−sin θ + (−x)")
+})
