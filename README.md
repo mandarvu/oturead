@@ -99,13 +99,27 @@ Themes in `~/.config/opencode/themes/` are picked up too.
 
 | File                   | Purpose |
 |------------------------|---------|
-| `src/index.tsx`        | CLI: parses arguments, picks the source (file, watch, stdin, or simulated stream), registers the tree-sitter grammars. When stdin is a pipe, keyboard input is read from `/dev/tty`. |
+| `src/index.tsx`        | CLI: parses arguments, picks the source (file, watch, stdin, or simulated stream) and starts tree-sitter warming up. When stdin is a pipe, keyboard input is read from `/dev/tty`. |
 | `src/App.tsx`          | The UI: title bar with breadcrumb, a scrollbox around `<markdown>`, status bar, help overlay, and key bindings. |
+| `src/ThemePicker.tsx`  | The floating, fuzzy-searchable theme list with live preview. |
 | `src/theme.ts`         | Resolves opencode v1 themes and builds the tree-sitter style table (based on opencode's `syntax.ts`). |
-| `src/markdown-ext.ts`  | Small additions to OpenTUI's `MarkdownRenderable`: underline and highlight, bullet and checkbox markers, quote bar colour. |
+| `src/markdown-ext.ts`  | Small additions to OpenTUI's `MarkdownRenderable`: underline and highlight, bullet and checkbox markers, quote bar colour, and painting text on the first frame. |
+| `src/highlight.ts`     | Registers the grammars and preloads the ones the document needs, while the renderer is still starting up. |
+| `src/progressive.ts`   | Picks the leading blocks of a large document to render first. |
+| `src/position.ts`      | Maps between rendered rows and source lines, for the editor integration. |
+| `src/editor.ts`        | Works out the editor command and launches it at a given line. |
+| `src/fuzzy.ts`         | The fuzzy matcher used by the theme picker. |
 | `src/parsers-config.ts`| The tree-sitter grammar list from opencode, plus extra fence aliases (`shell`, `golang`, `tf`, `jsonc`, …). |
 | `src/themes/`          | The bundled opencode themes. |
 | `scripts/snapshot.tsx` | Renders a file headlessly to HTML; used for the screenshots above. |
+
+## Development
+
+```bash
+bun test          # unit tests
+bun run typecheck
+bun run demo      # simulated streaming of examples/showcase.md
+```
 
 ## Credits
 
