@@ -8,6 +8,7 @@ import { ancestry, parseOutline, sectionAt, type Section } from "./outline"
 import { followLine, lineAtRow, locateBlocks, rowOfLine, type BlockSpan } from "./position"
 import { leadingBlocks } from "./progressive"
 import { ThemePicker } from "./ThemePicker"
+import { Toc, visibleSections } from "./Toc"
 import type { Source } from "./source"
 
 interface AppProps {
@@ -24,6 +25,8 @@ const HELP: [string, string][] = [
   ["space / b  PgDn / PgUp", "full page"],
   ["g / G  Home / End", "top / bottom"],
   ["] / [  n / p", "next / previous heading"],
+  ["o", "show / hide table of contents"],
+  ["tab", "focus contents: ↑↓ space enter h l esc"],
   ["z", "fold / unfold this section"],
   ["1-6 / 0", "fold to depth N / unfold all"],
   ["Z", "fold all / unfold all"],
@@ -79,6 +82,8 @@ export function App({ source, themes, initialTheme, initialMode, onExit }: AppPr
   const [pickerOrigin, setPickerOrigin] = useState<string>() // theme to restore if the picker is cancelled
   const [scrollPct, setScrollPct] = useState(0)
   const [currentLine, setCurrentLine] = useState(0) // source line at the top of the viewport
+  const [tocPreference, setTocPreference] = useState<boolean>() // unset: shown when the terminal is wide
+  const [tocCursor, setTocCursor] = useState<number>() // set while the table of contents has focus
   const [toast, setToast] = useState<string>()
   const savedScroll = useRef<number | undefined>(undefined)
 
@@ -247,6 +252,59 @@ export function App({ source, themes, initialTheme, initialMode, onExit }: AppPr
     if (renderer.copyToClipboardOSC52(text)) setToast(`copied ${text.length} chars`)
   })
 
+  // --- table of contents -----------------------------------------------------
+
+  const showToc = (tocPreference ?? width >= 100) && outline.length > 0
+  const tocWidth = Math.min(36, Math.max(22, Math.floor(width * 0.24)))
+  const activeSection = sectionAt(outline, currentLine)
+  const tocFocused = showToc && tocCursor !== undefined
+
+  const jumpToSection = (i: number) => {
+    const box = scrollRef.current
+    const section = outline[i]
+    if (!box || !section) return
+    box.scrollTo(Math.max(0, rowOfLine(blockSpans(), section.line) - 1))
+    refreshStatus()
+  }
+
+  const focusToc = () => {
+    const visible = visibleSections(outline, collapsed)
+    setTocCursor(visible.includes(activeSection) ? activeSection : visible[0])
+  }
+
+  /** Keys while the table of contents has focus; returns false to fall through to the global keys. */
+  const handleTocKey = (name: string, seq: string): boolean => {
+    const visible = visibleSections(outline, collapsed)
+    const cursor = tocCursor !== undefined && visible.includes(tocCursor) ? tocCursor : visible[0]
+    if (cursor === undefined) return false
+    const section = outline[cursor]!
+    const folded = section.hasBody && collapsed.has(section.id)
+    const moveTo = (i: number | undefined) => {
+      if (i === undefined) return
+      setTocCursor(i)
+      jumpToSection(i)
+    }
+    const position = visible.indexOf(cursor)
+
+    if (name === "escape" || name === "tab") setTocCursor(undefined)
+    else if (name === "j" || name === "down") moveTo(visible[Math.min(visible.length - 1, position + 1)])
+    else if (name === "k" || name === "up") moveTo(visible[Math.max(0, position - 1)])
+    else if (name === "g" || name === "home") moveTo(visible[0])
+    else if (seq === "G" || name === "end") moveTo(visible[visible.length - 1])
+    else if (name === "space" || seq === "z") toggleSection(cursor)
+    else if (name === "h" || name === "left") {
+      if (section.hasBody && !folded) toggleSection(cursor)
+      else moveTo(section.parent)
+    } else if (name === "l" || name === "right") {
+      if (folded) toggleSection(cursor)
+    } else if (name === "return") {
+      if (folded) toggleSection(cursor)
+      else jumpToSection(cursor)
+      setTocCursor(undefined)
+    } else return false
+    return true
+  }
+
   const jumpHeading = (direction: 1 | -1) => {
     const box = scrollRef.current
     if (!box) return
@@ -296,6 +354,12 @@ export function App({ source, themes, initialTheme, initialMode, onExit }: AppPr
     if (pickerOrigin !== undefined) return // the picker handles its own keys
     if (key.name === "q") return onExit()
     if (key.name === "escape" && showHelp) return setShowHelp(false)
+    if (tocFocused && handleTocKey(key.name, seq)) return
+    if (seq === "o") {
+      if (showToc) setTocCursor(undefined)
+      return setTocPreference(!showToc)
+    }
+    if (key.name === "tab" && showToc) return focusToc()
     if (seq === "?") return setShowHelp((v) => !v)
     if (key.name === "t") return setPickerOrigin(themeName)
     if (key.name === "e") return editAtViewport()
@@ -345,42 +409,60 @@ export function App({ source, themes, initialTheme, initialMode, onExit }: AppPr
         </text>
       </box>
 
-      <scrollbox
-        ref={scrollRef}
-        // Keys are handled globally below. If the scrollbox could take focus (the
-        // renderer focuses on click), its own j/k/PgUp/... handling would run as well
-        // and every keypress would scroll twice.
-        focusable={false}
-        flexGrow={1}
-        scrollY
-        scrollX={false}
-        stickyScroll={doc.streaming}
-        stickyStart="bottom"
-        viewportOptions={{ paddingRight: 1 }}
-        verticalScrollbarOptions={{
-          paddingLeft: 1,
-          trackOptions: {
-            backgroundColor: theme.backgroundElement,
-            foregroundColor: theme.border,
-          },
-        }}
-      >
-        <markdown
-          key={`${themeName}:${mode}:${conceal}`}
-          ref={markdownRef}
-          content={content}
-          syntaxStyle={syntax}
-          streaming={doc.streaming}
-          internalBlockMode="top-level"
-          tableOptions={{ style: "grid", cellPaddingX: 1, borderColor: theme.border }}
-          conceal={conceal}
-          fg={theme.markdownText}
-          bg={theme.background}
-          paddingX={2}
-          paddingTop={1}
-          paddingBottom={1}
-        />
-      </scrollbox>
+      <box flexGrow={1} flexDirection="row" backgroundColor={theme.background}>
+        {showToc && (
+          <Toc
+            outline={outline}
+            collapsed={collapsed}
+            active={activeSection}
+            cursor={tocFocused ? tocCursor : undefined}
+            theme={theme}
+            width={tocWidth}
+          rows={Math.max(1, height - 3)}
+            onSelect={(i) => {
+              if (tocFocused) setTocCursor(i)
+              jumpToSection(i)
+            }}
+            onToggle={toggleSection}
+          />
+        )}
+        <scrollbox
+          ref={scrollRef}
+          // Keys are handled globally below. If the scrollbox could take focus (the
+          // renderer focuses on click), its own j/k/PgUp/... handling would run as well
+          // and every keypress would scroll twice.
+          focusable={false}
+          flexGrow={1}
+          scrollY
+          scrollX={false}
+          stickyScroll={doc.streaming}
+          stickyStart="bottom"
+          viewportOptions={{ paddingRight: 1 }}
+          verticalScrollbarOptions={{
+            paddingLeft: 1,
+            trackOptions: {
+              backgroundColor: theme.backgroundElement,
+              foregroundColor: theme.border,
+            },
+          }}
+        >
+          <markdown
+            key={`${themeName}:${mode}:${conceal}`}
+            ref={markdownRef}
+            content={content}
+            syntaxStyle={syntax}
+            streaming={doc.streaming}
+            internalBlockMode="top-level"
+            tableOptions={{ style: "grid", cellPaddingX: 1, borderColor: theme.border }}
+            conceal={conceal}
+            fg={theme.markdownText}
+            bg={theme.background}
+            paddingX={2}
+            paddingTop={1}
+            paddingBottom={1}
+          />
+        </scrollbox>
+      </box>
 
       <box height={1} flexDirection="row" paddingX={1} backgroundColor={theme.backgroundPanel}>
         <text fg={doc.streaming ? theme.success : theme.textMuted} flexShrink={0}>
@@ -392,7 +474,9 @@ export function App({ source, themes, initialTheme, initialMode, onExit }: AppPr
           </text>
         </box>
         <text fg={theme.textMuted} flexShrink={0}>
-          ? help · ]/[ sections · e edit · t theme · q quit
+          {tocFocused
+            ? "↑↓ move · space fold · enter open · esc back"
+            : `? help${showToc ? " · tab contents" : " · o contents"} · z fold · e edit · t theme · q quit`}
         </text>
       </box>
 
