@@ -58,6 +58,14 @@ A = \begin{pmatrix} \cos\theta & -\sin\theta \\ \sin\theta & \cos\theta \end{pma
 |x| = \begin{cases} x & x \ge 0 \\ -x & \text{otherwise} \end{cases}
 $$
 
+## Images
+
+An image on a line of its own is drawn with your terminal's graphics protocol
+(kitty, ghostty and WezTerm use the kitty protocol; foot and others use sixel;
+anything else gets coloured half-blocks). Its alt text becomes the caption.
+
+![A sunset over the sea](images/sunset.png)
+
 ## Code
 
 ### TypeScript

@@ -27,6 +27,8 @@ style rules, and opencode's themes.
 - **Lists**: a different bullet at each nesting depth (`•` `◦` `▸`), coloured
   numbers, and `☐`/`☑` task checkboxes.
 - **Blockquotes** have a coloured bar and italic text.
+- **Images** on their own line are drawn with the kitty graphics protocol
+  (kitty, ghostty, WezTerm), sixel, or coloured half-blocks elsewhere (see below).
 - **LaTeX math**: `$…$` and `\(…\)` render inline as Unicode (`x² + y²`,
   `αᵢ ∈ ℝ`), and `$$…$$` / `\[…\]` render as 2D blocks with stacked fractions,
   limits and matrices (see below).
@@ -60,6 +62,7 @@ cp dist/oturead ~/.local/bin/
 ```bash
 oturead README.md                    # read a file
 oturead -w notes.md                  # re-render whenever the file changes
+oturead --remote-images README.md    # also fetch http(s) images
 llm "explain monads" | oturead       # render streamed LLM output live
 oturead -s examples/showcase.md      # replay a file as if an LLM were streaming it
 oturead -s 1500 doc.md               # ...at 1500 chars/sec
@@ -100,6 +103,32 @@ letter styles, `\left`/`\right`, `\text`, and the `matrix`, `cases` and
 
 Math inside code is never touched, and `$5 and $10` isn't treated as math.
 Press `r` to see the original LaTeX.
+
+### Images
+
+An image on a line of its own, like `![Architecture](docs/arch.png)`, is
+drawn in the document with its alt text as a caption. oturead uses the best
+method your terminal supports:
+
+| Terminal                      | Drawn with |
+|-------------------------------|------------|
+| kitty, ghostty, WezTerm       | kitty graphics protocol (full resolution) |
+| foot, mlterm, and other sixel terminals | sixel |
+| everything else, and inside tmux | coloured half-block characters |
+
+Images fill the width up to their natural size and up to 60% of the screen
+height, and they fold with their section. Relative paths resolve against the
+markdown file's folder. PNG, JPEG, WebP and GIF are supported; SVG is not
+(you get a caption saying so). An image in the middle of a sentence stays as
+its alt text.
+
+**Remote images are off by default.** Fetching `https://…` images from a
+document you're only reading would tell a third party that you opened it, and
+could slow things down. Start oturead with `--remote-images` to load them.
+Until then they show a caption explaining why they're missing.
+
+To force a method, set `OPENTUI_IMAGE_PROTOCOL` to `kitty`, `sixel` or
+`blocks`.
 
 ### Long documents
 
@@ -166,6 +195,7 @@ Themes in `~/.config/opencode/themes/` are picked up too.
 | `src/progressive.ts`   | Picks the leading blocks of a large document to render first. |
 | `src/position.ts`      | Maps between rendered rows and source lines, for the editor, folding and the table of contents. |
 | `src/editor.ts`        | Works out the editor command and launches it at a given line. |
+| `src/images.ts`, `src/image-block.ts` | Which images get a block, where they load from, how big they are, and the block that draws them. |
 | `src/math/`            | The LaTeX parser and its inline and 2D renderers (`latex.ts`, `symbols.ts`), and finding math in markdown (`markdown.ts`). |
 | `src/fuzzy.ts`         | The fuzzy matcher used by the theme picker. |
 | `src/parsers-config.ts`| The tree-sitter grammar list from opencode, plus extra fence aliases (`shell`, `golang`, `tf`, `jsonc`, …). |
