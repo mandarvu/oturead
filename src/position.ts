@@ -66,3 +66,22 @@ export function rowOfLine(blocks: BlockSpan[], line: number): number {
   if (!current) return 0
   return current.offset + Math.min(line - current.line, current.height - 1)
 }
+
+/**
+ * Where 0-based `line` of `before` ended up in `after`, so the reader stays on
+ * the same text when lines were added or removed above it. Lines inside the
+ * edited region keep their number.
+ */
+export function followLine(before: string, after: string, line: number): number {
+  const a = before.split("\n")
+  const b = after.split("\n")
+  let prefix = 0
+  while (prefix < a.length && prefix < b.length && a[prefix] === b[prefix]) prefix++
+  if (line < prefix) return line
+  let suffix = 0
+  while (suffix < a.length - prefix && suffix < b.length - prefix && a[a.length - 1 - suffix] === b[b.length - 1 - suffix]) {
+    suffix++
+  }
+  if (line >= a.length - suffix) return line + (b.length - a.length)
+  return Math.min(line, b.length - 1)
+}

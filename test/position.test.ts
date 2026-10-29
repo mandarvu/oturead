@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { lineAtRow, locateBlocks, rowOfLine, type BlockSpan } from "../src/position"
+import { followLine, lineAtRow, locateBlocks, rowOfLine, type BlockSpan } from "../src/position"
 
 const content = "# Title\n\nPara one\nstill para\n\n```js\na()\nb()\n```\n\n- x\n- y\n"
 const raws = ["# Title\n\n", "Para one\nstill para\n\n", "```js\na()\nb()\n```\n\n", "- x\n- y\n"]
@@ -57,5 +57,26 @@ describe("rowOfLine", () => {
 
   test("blank lines between blocks map to the block above", () => {
     expect(rowOfLine(blocks, 4)).toBe(3)
+  })
+})
+
+describe("followLine", () => {
+  const before = "a\nb\nc\nd\ne"
+
+  test("lines above an edit keep their number", () => {
+    expect(followLine(before, "a\nb\nc\nd\nE", 1)).toBe(1)
+  })
+
+  test("lines below an insertion move down with it", () => {
+    expect(followLine(before, "a\nnew\nnew\nb\nc\nd\ne", 3)).toBe(5)
+  })
+
+  test("lines below a deletion move up with it", () => {
+    expect(followLine(before, "a\nd\ne", 4)).toBe(2)
+  })
+
+  test("a line inside the edited region keeps its number, clamped to the file", () => {
+    expect(followLine(before, "a\nX\ne", 2)).toBe(2)
+    expect(followLine(before, "a", 3)).toBe(0)
   })
 })

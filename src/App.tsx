@@ -3,7 +3,7 @@ import { useKeyboard, useRenderer, useSelectionHandler, useTerminalDimensions } 
 import type { MarkdownRenderable, ScrollBoxRenderable } from "@opentui/core"
 import { generateSyntax, resolveTheme, type Mode, type ThemeJson } from "./theme"
 import { openInEditor } from "./editor"
-import { lineAtRow, locateBlocks, rowOfLine, type BlockSpan } from "./position"
+import { followLine, lineAtRow, locateBlocks, rowOfLine, type BlockSpan } from "./position"
 import { leadingBlocks } from "./progressive"
 import { ThemePicker } from "./ThemePicker"
 import type { Source } from "./source"
@@ -180,8 +180,9 @@ export function App({ source, themes, initialTheme, initialMode, onExit }: AppPr
     if (!target) return
     returnTo.current = undefined
     if (target.content === doc.content) return // unchanged: we're already there
+    const line = followLine(target.content, doc.content, target.line)
     const restore = () => {
-      scrollRef.current?.scrollTo(rowOfLine(blockSpans(), target.line))
+      scrollRef.current?.scrollTo(rowOfLine(blockSpans(), line))
       refreshStatus()
     }
     // Block positions are only final once the new content has been laid out.
