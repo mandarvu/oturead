@@ -20,6 +20,7 @@ for (let i = 0; i < 40; i++) { await setup.renderOnce(); await Bun.sleep(100) }
 for (const key of keys) {
   setup.mockInput.pressKey(key)
   for (let i = 0; i < 3; i++) await setup.renderOnce()
+  await Bun.sleep(30)
 }
 for (let i = 0; i < 5; i++) { await setup.renderOnce(); await Bun.sleep(50) }
 const frame = setup.captureSpans()

@@ -3,6 +3,7 @@ import { useKeyboard, useRenderer, useSelectionHandler, useTerminalDimensions } 
 import type { MarkdownRenderable, ScrollBoxRenderable } from "@opentui/core"
 import { generateSyntax, resolveTheme, type Mode, type ThemeJson } from "./theme"
 import { leadingBlocks } from "./progressive"
+import { ThemePicker } from "./ThemePicker"
 import type { Source } from "./source"
 
 interface AppProps {
@@ -21,7 +22,7 @@ const HELP: [string, string][] = [
   ["space / b  PgDn / PgUp", "full page"],
   ["g / G  Home / End", "top / bottom"],
   ["] / [  n / p", "next / previous heading"],
-  ["t / T", "next / previous theme"],
+  ["t", "pick theme (fuzzy search)"],
   ["m", "toggle dark / light"],
   ["r", "toggle rendered / raw markdown"],
   ["mouse drag", "select & copy (OSC 52)"],
@@ -60,6 +61,7 @@ export function App({ source, themes, initialTheme, initialMode, onExit }: AppPr
   const [mode, setMode] = useState<Mode>(initialMode)
   const [conceal, setConceal] = useState(true)
   const [showHelp, setShowHelp] = useState(false)
+  const [pickerOrigin, setPickerOrigin] = useState<string>() // theme to restore if the picker is cancelled
   const [scrollPct, setScrollPct] = useState(0)
   const [section, setSection] = useState<Heading[]>([])
   const [toast, setToast] = useState<string>()
@@ -158,11 +160,11 @@ export function App({ source, themes, initialTheme, initialMode, onExit }: AppPr
 
   // OpenTUI doesn't restyle nested list items when the syntax style changes, so
   // style changes remount the markdown; remember where we were to restore it.
-  const restyle = (apply: () => void) => {
+  const restyle = useCallback((apply: () => void) => {
     const box = scrollRef.current
     if (box && box.scrollHeight > 0) savedScroll.current = box.scrollTop / box.scrollHeight
     apply()
-  }
+  }, [])
 
   useEffect(() => {
     const ratio = savedScroll.current
@@ -176,20 +178,24 @@ export function App({ source, themes, initialTheme, initialMode, onExit }: AppPr
     return () => clearTimeout(timer)
   }, [themeName, mode, conceal, refreshStatus])
 
-  const cycleTheme = (direction: 1 | -1) => {
-    const index = themeNames.indexOf(themeName)
-    const next = themeNames[(index + direction + themeNames.length) % themeNames.length]!
-    setThemeName(next)
-    setToast(`theme: ${next}`)
-  }
+  const themeNameRef = useRef(themeName)
+  themeNameRef.current = themeName
+  const applyTheme = useCallback(
+    (name: string) => {
+      if (name !== themeNameRef.current) restyle(() => setThemeName(name))
+    },
+    [restyle],
+  )
 
   useKeyboard((key) => {
     const box = scrollRef.current
     const seq = key.sequence
-    if (key.name === "q" || (key.ctrl && key.name === "c")) return onExit()
+    if (key.ctrl && key.name === "c") return onExit()
+    if (pickerOrigin !== undefined) return // the picker handles its own keys
+    if (key.name === "q") return onExit()
     if (key.name === "escape" && showHelp) return setShowHelp(false)
     if (seq === "?") return setShowHelp((v) => !v)
-    if (key.name === "t") return restyle(() => cycleTheme(key.shift ? -1 : 1))
+    if (key.name === "t") return setPickerOrigin(themeName)
     if (key.name === "m") return restyle(() => setMode((m) => (m === "dark" ? "light" : "dark")))
     if (key.name === "r") return restyle(() => setConceal((c) => !c))
     if (!box) return
@@ -275,6 +281,26 @@ export function App({ source, themes, initialTheme, initialMode, onExit }: AppPr
           ? help · ]/[ sections · t theme · q quit
         </text>
       </box>
+
+      {pickerOrigin !== undefined && (
+        <ThemePicker
+          names={themeNames}
+          current={pickerOrigin}
+          theme={theme}
+          width={width}
+          height={height}
+          onPreview={applyTheme}
+          onSelect={(name) => {
+            applyTheme(name)
+            setPickerOrigin(undefined)
+            setToast(`theme: ${name}`)
+          }}
+          onCancel={() => {
+            applyTheme(pickerOrigin)
+            setPickerOrigin(undefined)
+          }}
+        />
+      )}
 
       {showHelp && (
         <box

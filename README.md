@@ -73,7 +73,7 @@ You can also set a default theme with the `OTUREAD_THEME` environment variable.
 | `space` / `b`, PgDn/PgUp| full page down / up            |
 | `g` / `G`, Home/End     | top / bottom                   |
 | `]` / `[`, `n` / `p`    | next / previous heading        |
-| `t` / `T`               | next / previous theme          |
+| `t`                     | theme picker: type to fuzzy-search, ↑/↓ to preview live, Enter to apply, Esc to revert |
 | `m`                     | toggle dark / light            |
 | `r`                     | toggle rendered / raw markdown |
 | mouse drag              | select text and copy it        |
