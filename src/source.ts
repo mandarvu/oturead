@@ -6,8 +6,12 @@ export type Doc = { content: string; streaming: boolean }
 /** A markdown document that may change over time (piped LLM output, a watched file, ...). */
 export interface Source {
   readonly title: string
+  /** Set when the document is a file on disk, which makes it editable. */
+  readonly path?: string
   get(): Doc
   subscribe(listener: () => void): () => void
+  /** Re-reads the document from disk, if it has one. */
+  reload?(): void
 }
 
 function createSource(title: string, initial: Doc, start: (set: (doc: Doc) => void) => void): Source {
@@ -29,7 +33,9 @@ function createSource(title: string, initial: Doc, start: (set: (doc: Doc) => vo
 
 export function fileSource(path: string, title: string, follow: boolean): Source {
   const read = () => readFileSync(path, "utf-8")
-  return createSource(title, { content: read(), streaming: false }, (set) => {
+  let update: (doc: Doc) => void = () => {}
+  const source = createSource(title, { content: read(), streaming: false }, (set) => {
+    update = set
     if (!follow) return
     let timer: ReturnType<typeof setTimeout> | undefined
     // Watch the directory: editors that save via rename would orphan a file watcher.
@@ -46,6 +52,17 @@ export function fileSource(path: string, title: string, follow: boolean): Source
       }, 50)
     })
   })
+  return {
+    ...source,
+    path,
+    reload() {
+      try {
+        update({ content: read(), streaming: false })
+      } catch {
+        // Deleted or unreadable: keep showing the last good content.
+      }
+    },
+  }
 }
 
 /** Renders stdin as it arrives, e.g. `llm "explain monads" | oturead`. */

@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { useKeyboard, useRenderer, useSelectionHandler, useTerminalDimensions } from "@opentui/react"
 import type { MarkdownRenderable, ScrollBoxRenderable } from "@opentui/core"
 import { generateSyntax, resolveTheme, type Mode, type ThemeJson } from "./theme"
+import { openInEditor } from "./editor"
+import { lineAtRow, locateBlocks, rowOfLine, type BlockSpan } from "./position"
 import { leadingBlocks } from "./progressive"
 import { ThemePicker } from "./ThemePicker"
 import type { Source } from "./source"
@@ -22,6 +24,7 @@ const HELP: [string, string][] = [
   ["space / b  PgDn / PgUp", "full page"],
   ["g / G  Home / End", "top / bottom"],
   ["] / [  n / p", "next / previous heading"],
+  ["e", "edit in $EDITOR at this line"],
   ["t", "pick theme (fuzzy search)"],
   ["m", "toggle dark / light"],
   ["r", "toggle rendered / raw markdown"],
@@ -107,6 +110,21 @@ export function App({ source, themes, initialTheme, initialMode, onExit }: AppPr
     return out
   }, [])
 
+  // Source line + rendered position of every top-level block.
+  const blockSpans = useCallback((): BlockSpan[] => {
+    const md = markdownRef.current as any
+    const box = scrollRef.current
+    if (!md || !box) return []
+    const states: any[] = md._blockStates ?? []
+    const located = locateBlocks(md.content, states.map((state) => state.tokenRaw ?? state.token?.raw ?? ""))
+    const base = box.content.y
+    return states.map((state, i) => ({
+      ...located[i]!,
+      offset: state.renderable.y - base,
+      height: Math.max(1, state.renderable.height),
+    }))
+  }, [])
+
   const refreshStatus = useCallback(() => {
     const box = scrollRef.current
     if (!box) return
@@ -137,6 +155,41 @@ export function App({ source, themes, initialTheme, initialMode, onExit }: AppPr
     const timer = setTimeout(refreshStatus, 30)
     return () => clearTimeout(timer)
   }, [doc, themeName, mode, conceal, width, height, refreshStatus])
+
+  // Open the file in $EDITOR at the line at the top of the viewport, then come
+  // back to that line once the editor exits.
+  const returnTo = useRef<{ line: number; content: string } | undefined>(undefined)
+  const editAtViewport = () => {
+    if (!source.path || !source.reload) return setToast("nothing to edit: not reading from a file")
+    const box = scrollRef.current
+    const line = box ? lineAtRow(blockSpans(), box.scrollTop) : 0
+    renderer.suspend()
+    let error: string | undefined
+    try {
+      error = openInEditor(source.path, line + 1)
+    } finally {
+      renderer.resume()
+    }
+    if (error) setToast(error)
+    returnTo.current = { line, content: doc.content }
+    source.reload()
+  }
+
+  useEffect(() => {
+    const target = returnTo.current
+    if (!target) return
+    returnTo.current = undefined
+    if (target.content === doc.content) return // unchanged: we're already there
+    const restore = () => {
+      scrollRef.current?.scrollTo(rowOfLine(blockSpans(), target.line))
+      refreshStatus()
+    }
+    // Block positions are only final once the new content has been laid out.
+    renderer.once("frame", restore)
+    return () => {
+      renderer.off("frame", restore)
+    }
+  }, [doc, renderer, blockSpans, refreshStatus])
 
   useSelectionHandler((selection) => {
     if (selection.isDragging) return
@@ -196,6 +249,7 @@ export function App({ source, themes, initialTheme, initialMode, onExit }: AppPr
     if (key.name === "escape" && showHelp) return setShowHelp(false)
     if (seq === "?") return setShowHelp((v) => !v)
     if (key.name === "t") return setPickerOrigin(themeName)
+    if (key.name === "e") return editAtViewport()
     if (key.name === "m") return restyle(() => setMode((m) => (m === "dark" ? "light" : "dark")))
     if (key.name === "r") return restyle(() => setConceal((c) => !c))
     if (!box) return
@@ -278,7 +332,7 @@ export function App({ source, themes, initialTheme, initialMode, onExit }: AppPr
           </text>
         </box>
         <text fg={theme.textMuted} flexShrink={0}>
-          ? help · ]/[ sections · t theme · q quit
+          ? help · ]/[ sections · e edit · t theme · q quit
         </text>
       </box>
 

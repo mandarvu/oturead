@@ -64,6 +64,15 @@ oturead --list-themes
 
 You can also set a default theme with the `OTUREAD_THEME` environment variable.
 
+### Editing
+
+Press `e` to open the file in your editor at the line at the top of the
+screen. oturead checks `$VISUAL`, then `$EDITOR`, and falls back to `vi`. It
+passes the line the way each editor expects: `+LINE` for vi, vim, nvim, nano,
+emacs, micro, kak and others; `FILE:LINE` for helix; and `--wait --goto` for
+VS Code, Cursor and similar. When the editor exits, oturead reloads the file
+and scrolls back to the same place.
+
 ### Keys
 
 | Key                     | Action                         |
@@ -73,6 +82,7 @@ You can also set a default theme with the `OTUREAD_THEME` environment variable.
 | `space` / `b`, PgDn/PgUp| full page down / up            |
 | `g` / `G`, Home/End     | top / bottom                   |
 | `]` / `[`, `n` / `p`    | next / previous heading        |
+| `e`                     | edit the file in `$VISUAL` / `$EDITOR` at the line you're reading; returns there when you quit the editor |
 | `t`                     | theme picker: type to fuzzy-search, ↑/↓ to preview live, Enter to apply, Esc to revert |
 | `m`                     | toggle dark / light            |
 | `r`                     | toggle rendered / raw markdown |
