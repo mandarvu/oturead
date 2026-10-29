@@ -4,6 +4,8 @@ import type { MarkdownRenderable, ScrollBoxRenderable } from "@opentui/core"
 import { generateSyntax, resolveTheme, type Mode, type ThemeJson } from "./theme"
 import { openInEditor } from "./editor"
 import { foldMarkdown } from "./fold"
+import { createImageBlock, type ImageOptions } from "./image-block"
+import { standaloneImage } from "./images"
 import { renderMathInMarkdown } from "./math/markdown"
 import { ancestry, parseOutline, sectionAt, type Section } from "./outline"
 import { followLine, lineAtRow, locateBlocks, rowOfLine, type BlockSpan } from "./position"
@@ -17,6 +19,8 @@ interface AppProps {
   themes: Record<string, ThemeJson>
   initialTheme: string
   initialMode: Mode
+  /** Image loading; without it, images show as their alt text. */
+  images?: ImageOptions
   onExit: () => void
 }
 
@@ -48,7 +52,7 @@ function overviewDepth(outline: Section[]): number {
   return 1
 }
 
-export function App({ source, themes, initialTheme, initialMode, onExit }: AppProps) {
+export function App({ source, themes, initialTheme, initialMode, images, onExit }: AppProps) {
   const renderer = useRenderer()
   const { width, height } = useTerminalDimensions()
   const doc = useSyncExternalStore(source.subscribe, source.get)
@@ -108,6 +112,15 @@ export function App({ source, themes, initialTheme, initialMode, onExit }: AppPr
     if (resolved.error) setToast(resolved.error)
   }, [resolved])
   const syntax = useMemo(() => generateSyntax(theme), [theme])
+
+  // Images that stand on their own line become image blocks (raw mode shows the markdown).
+  const renderNode = useMemo(() => {
+    if (!images || !conceal) return undefined
+    return (token: unknown) => {
+      const image = standaloneImage(token)
+      return image ? createImageBlock(renderer, image, images, theme) : null
+    }
+  }, [images, conceal, renderer, theme])
   useEffect(() => () => syntax.destroy(), [syntax])
 
   useEffect(() => {
@@ -461,6 +474,7 @@ export function App({ source, themes, initialTheme, initialMode, onExit }: AppPr
             syntaxStyle={syntax}
             streaming={doc.streaming}
             internalBlockMode="top-level"
+            renderNode={renderNode}
             tableOptions={{ style: "grid", cellPaddingX: 1, borderColor: theme.border }}
             conceal={conceal}
             fg={theme.markdownText}

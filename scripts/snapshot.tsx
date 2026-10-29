@@ -4,6 +4,7 @@
 import { RGBA, TextAttributes } from "@opentui/core"
 import { testRender } from "@opentui/react/test-utils"
 import { readFileSync, writeFileSync } from "fs"
+import { dirname, resolve } from "path"
 import "../src/markdown-ext"
 import { App } from "../src/App"
 import { warmUpHighlighter } from "../src/highlight"
@@ -13,7 +14,7 @@ import { loadThemes } from "../src/theme"
 const [file, out, cols = "100", rows = "60", theme = "opencode", keys = ""] = process.argv.slice(2)
 warmUpHighlighter(readFileSync(file!, "utf-8"))
 const setup = await testRender(
-  <App source={fileSource(file!, file!.split("/").pop()!, false)} themes={loadThemes()} initialTheme={theme} initialMode="dark" onExit={() => {}} />,
+  <App source={fileSource(file!, file!.split("/").pop()!, false)} themes={loadThemes()} initialTheme={theme} initialMode="dark" images={{ baseDir: dirname(resolve(file!)), allowRemote: false }} onExit={() => {}} />,
   { width: Number(cols), height: Number(rows) },
 )
 for (let i = 0; i < 40; i++) { await setup.renderOnce(); await Bun.sleep(100) }

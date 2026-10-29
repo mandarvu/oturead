@@ -2,7 +2,7 @@
 import { createCliRenderer } from "@opentui/core"
 import { createRoot } from "@opentui/react"
 import { openSync, readFileSync } from "fs"
-import { basename, resolve } from "path"
+import { basename, dirname, resolve } from "path"
 import { ReadStream } from "tty"
 import { parseArgs } from "util"
 import "./markdown-ext"
@@ -21,6 +21,7 @@ Options:
   -t, --theme <name>     colour theme (default: opencode)
   -l, --light            use the light variant of the theme
   -w, --watch            re-render when the file changes
+      --remote-images    load http(s) images (off by default: reading a document shouldn't phone home)
   -s, --simulate [cps]   replay the file as if streamed by an LLM (default 400 chars/s)
       --list-themes      print available themes and exit
   -h, --help             show this help
@@ -33,6 +34,7 @@ const { values, positionals } = parseArgs({
     theme: { type: "string", short: "t", default: process.env.OTUREAD_THEME ?? "opencode" },
     light: { type: "boolean", short: "l", default: false },
     watch: { type: "boolean", short: "w", default: false },
+    "remote-images": { type: "boolean", default: false },
     simulate: { type: "boolean", short: "s", default: false },
     "list-themes": { type: "boolean", default: false },
     help: { type: "boolean", short: "h", default: false },
@@ -64,6 +66,7 @@ const filePath = positionals[0]
 const piped = !process.stdin.isTTY && (!filePath || filePath === "-")
 
 let source: Source
+let baseDir = process.cwd() // relative image paths resolve against the document's folder
 if (piped) {
   source = stdinSource(process.stdin)
 } else if (filePath) {
@@ -76,6 +79,7 @@ if (piped) {
     process.exit(1)
   }
   const title = basename(absolutePath)
+  baseDir = dirname(absolutePath)
   source = values.simulate ? simulatedSource(content, title, cps) : fileSource(absolutePath, title, values.watch!)
 } else {
   process.stderr.write(USAGE)
@@ -105,6 +109,7 @@ createRoot(renderer).render(
     source={source}
     themes={themes}
     initialTheme={values.theme!}
+    images={{ baseDir, allowRemote: values["remote-images"]! }}
     initialMode={(values.light ? "light" : "dark") as Mode}
     onExit={exit}
   />,
